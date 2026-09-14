@@ -16,7 +16,8 @@
 #include <functional>
 #include <utility>
 #include <vector>
-
+#include <memory>
+#include <atomic>
 #include "common/util/hash_util.h"
 
 namespace bustub {
@@ -82,6 +83,7 @@ class CountMinSketch {
   /** Dimensions of the count-min sketch matrix */
   uint32_t width_;  // Number of buckets for each hash function
   uint32_t depth_;  // Number of independent hash functions
+  std::unique_ptr<std::atomic<uint32_t>[]> counters_;
   /** Pre-computed hash functions for each row */
   std::vector<std::function<size_t(const KeyType &)>> hash_functions_;
 
@@ -103,6 +105,7 @@ class CountMinSketch {
   }
 
   /** @todo (student) can add their data structures that support count-min sketch operations */
+
 };
 
 }  // namespace bustub

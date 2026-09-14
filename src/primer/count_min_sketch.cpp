@@ -34,6 +34,10 @@ CountMinSketch<KeyType>::CountMinSketch(uint32_t width, uint32_t depth) : width_
 
   /** @spring2026 PLEASE DO NOT MODIFY THE FOLLOWING */
   // Initialize seeded hash functions
+  if (width == 0 || depth == 0) {
+  throw std::invalid_argument(
+      "Width and depth must be greater than zero.");
+}
   for(size_t i=0;i<static_cast<size_t>(width_)*depth_;++i)
   {
     counters_[i].store(0);
@@ -46,13 +50,35 @@ CountMinSketch<KeyType>::CountMinSketch(uint32_t width, uint32_t depth) : width_
 }
 
 template <typename KeyType>
-CountMinSketch<KeyType>::CountMinSketch(CountMinSketch &&other) noexcept : width_(other.width_), depth_(other.depth_) {
+CountMinSketch<KeyType>::CountMinSketch(CountMinSketch &&other) noexcept : width_(other.width_), depth_(other.depth_),counters_(std::move(otehr.counters_)) {
   /** @TODO(student) Implement this function! */
+  hash_functions_.reserve(depth_);
+  for(size_t i=0;i<depth_;++i)
+  {
+    hash_functions_.push_back(this->HashFunction(i));
+  }
+  other.width_=0;
+  other.depth_=0;
+  other.hash_functions_.clear();
 }
 
 template <typename KeyType>
 auto CountMinSketch<KeyType>::operator=(CountMinSketch &&other) noexcept -> CountMinSketch & {
   /** @TODO(student) Implement this function! */
+  if(this==&other)
+  return *this;
+  width_=other.width_;
+  depth_=other.depth_;
+  counters_=std::move(other.counters_);
+  hash_functions_.clear();
+  hash_functions_.reserve(depth_);
+  for(size_t i=0;i<depth_;++i)
+  {
+    hash_functions_.push_back(this->HashFunction(i));
+  }
+  other.width_=0;
+  other.depth_=0;
+  other.hash_functions_.clear();
   return *this;
 }
 
