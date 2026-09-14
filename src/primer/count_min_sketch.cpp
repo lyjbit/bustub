@@ -14,7 +14,11 @@
 
 #include <stdexcept>
 #include <string>
-
+#include <vector>
+#include <atomic>
+#include <memory>
+#include <algorithm>
+#include <limits>
 namespace bustub {
 
 /**
@@ -25,15 +29,20 @@ namespace bustub {
  * @throws std::invalid_argument if width or depth are zero.
  */
 template <typename KeyType>
-CountMinSketch<KeyType>::CountMinSketch(uint32_t width, uint32_t depth) : width_(width), depth_(depth) {
+CountMinSketch<KeyType>::CountMinSketch(uint32_t width, uint32_t depth) : width_(width), depth_(depth) ,counters_(std::make_unique<std::atomic<uint32_t>[]>(static_cast<size_t>(width)*depth)){
   /** @TODO(student) Implement this function! */
 
   /** @spring2026 PLEASE DO NOT MODIFY THE FOLLOWING */
   // Initialize seeded hash functions
+  for(size_t i=0;i<static_cast<size_t>(width_)*depth_;++i)
+  {
+    counters_[i].store(0);
+  }
   hash_functions_.reserve(depth_);
-  for (size_t i = 0; i < depth_; i++) {
+  for (size_t i = 0; i < depth_; i++) { 
     hash_functions_.push_back(this->HashFunction(i));
   }
+  
 }
 
 template <typename KeyType>
@@ -49,7 +58,14 @@ auto CountMinSketch<KeyType>::operator=(CountMinSketch &&other) noexcept -> Coun
 
 template <typename KeyType>
 void CountMinSketch<KeyType>::Insert(const KeyType &item) {
+  size_t i=0;
   /** @TODO(student) Implement this function! */
+  for(const auto &hash_i:hash_functions_)
+  {
+    size_t index=i*width_+hash_i(item);
+    counters_[index].fetch_add(1, std::memory_order_relaxed);
+    ++i;
+  }
 }
 
 template <typename KeyType>
@@ -58,16 +74,33 @@ void CountMinSketch<KeyType>::Merge(const CountMinSketch<KeyType> &other) {
     throw std::invalid_argument("Incompatible CountMinSketch dimensions for merge.");
   }
   /** @TODO(student) Implement this function! */
+  for(size_t i=0;i<static_cast<size_t>(width_)*depth_;++i)
+  {
+    counters_[i].fetch_add(other.counters_[i].load(std::memory_order_relaxed),std::memory_order_relaxed);
+  }
 }
 
 template <typename KeyType>
 auto CountMinSketch<KeyType>::Count(const KeyType &item) const -> uint32_t {
-  return 0;
+  uint32_t min_count=std::numeric_limits<uint32_t>::max();
+  for(size_t i=0;i<depth_;++i)
+  {
+    size_t index=i*width_+hash_functions_[i](item);
+    min_count=std::min(min_count,counters_[index].load(std::memory_order_relaxed));
+  }
+  return min_count;
 }
 
 template <typename KeyType>
 void CountMinSketch<KeyType>::Clear() {
   /** @TODO(student) Implement this function! */
+  for(size_t i=0;i<depth_;++i)
+  {
+    for(size_t j=0;j<width_;++j)
+    {
+      counters_[i*width_+j].store(0,std::memory_order_relaxed);
+    }
+  }
 }
 
 template <typename KeyType>
