@@ -50,7 +50,7 @@ CountMinSketch<KeyType>::CountMinSketch(uint32_t width, uint32_t depth) : width_
 }
 
 template <typename KeyType>
-CountMinSketch<KeyType>::CountMinSketch(CountMinSketch &&other) noexcept : width_(other.width_), depth_(other.depth_),counters_(std::move(otehr.counters_)) {
+CountMinSketch<KeyType>::CountMinSketch(CountMinSketch &&other) noexcept : width_(other.width_), depth_(other.depth_),counters_(std::move(other.counters_)) {
   /** @TODO(student) Implement this function! */
   hash_functions_.reserve(depth_);
   for(size_t i=0;i<depth_;++i)
@@ -133,7 +133,16 @@ template <typename KeyType>
 auto CountMinSketch<KeyType>::TopK(uint16_t k, const std::vector<KeyType> &candidates)
     -> std::vector<std::pair<KeyType, uint32_t>> {
   /** @TODO(student) Implement this function! */
-  return {};
+  std::vector<std::pair<KeyType, uint32_t>> ans;
+  size_t candidates_num=candidates.size();
+  for(size_t i=0;i<candidates_num;++i)
+  {
+    ans.push_back({candidates[i],Count(candidates[i])});
+  }
+  std::stable_sort(ans.begin(),ans.end(),[](const auto& a,const auto& b){return b.second<a.second;});
+  if(ans.size()>k)
+  ans.resize(k);
+  return ans;
 }
 
 // Explicit instantiations for all types used in tests
