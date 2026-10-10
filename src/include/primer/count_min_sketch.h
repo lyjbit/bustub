@@ -12,12 +12,12 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <utility>
 #include <vector>
-#include <memory>
-#include <atomic>
 #include "common/util/hash_util.h"
 
 namespace bustub {
@@ -105,7 +105,6 @@ class CountMinSketch {
   }
 
   /** @todo (student) can add their data structures that support count-min sketch operations */
-
 };
 
 }  // namespace bustub

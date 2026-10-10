@@ -75,7 +75,24 @@ auto ArcReplacer::Evict() -> std::optional<frame_id_t> { return std::nullopt; }
  * @param access_type type of access that was received. This parameter is only needed for
  * leaderboard tests.
  */
-void ArcReplacer::RecordAccess(frame_id_t frame_id, page_id_t page_id, [[maybe_unused]] AccessType access_type) {}
+void ArcReplacer::RecordAccess(frame_id_t frame_id, page_id_t page_id, [[maybe_unused]] AccessType access_type) {
+  BUSTUB_ENSURE(
+    frame_id >= 0 && static_cast<size_t>(frame_id) < replacer_size_,
+    "invalid frame id");
+    auto it=alive_map_.find(frame_id);
+    if(it!=alive_map_.end()){
+      auto &status =*it->second;
+      if(status.arc_status_== ArcStatus::MRU){
+        mfu_.splice(mfu_.begin(),mru_,status.alive_pos_);
+      }else{
+        mfu_.splice(mfu_.begin(),mfu_,status.alive_pos_);
+      }
+
+      status.alive_pos_ =ArcStatus::MFU;
+      return ;
+    }
+    
+}
 
 /**
  * TODO(P1): Add implementation
@@ -114,13 +131,9 @@ void ArcReplacer::SetEvictable(frame_id_t frame_id, bool set_evictable) {}
  */
 void ArcReplacer::Remove(frame_id_t frame_id) {}
 
-/**
- * TODO(P1): Add implementation
- *
- * @brief Return replacer's size, which tracks the number of evictable frames.
- *
- * @return size_t
- */
-auto ArcReplacer::Size() -> size_t { return 0; }
+auto ArcReplacer::Size() -> size_t {
+  std::scoped_lock lock(latch_);
+  return curr_size_;
+}
 
 }  // namespace bustub
