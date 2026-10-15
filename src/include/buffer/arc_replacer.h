@@ -35,6 +35,7 @@ struct FrameStatus {
   bool evictable_;
   ArcStatus arc_status_;
   std::list<frame_id_t>::iterator alive_pos_;
+  std::list<page_id_t>::iterator ghost_pos_;
   FrameStatus(page_id_t pid, frame_id_t fid, bool ev, ArcStatus st)
       : page_id_(pid), frame_id_(fid), evictable_(ev), arc_status_(st) {}
 };

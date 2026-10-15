@@ -14,6 +14,7 @@
 #include "buffer/arc_replacer.h"
 #include <optional>
 #include "common/config.h"
+#include <algorithm>
 
 namespace bustub {
 
@@ -44,7 +45,45 @@ ArcReplacer::ArcReplacer(size_t num_frames) : replacer_size_(num_frames) {}
  *
  * @return frame id of the evicted frame, or std::nullopt if cannot evict
  */
-auto ArcReplacer::Evict() -> std::optional<frame_id_t> { return std::nullopt; }
+auto ArcReplacer::Evict() -> std::optional<frame_id_t> { 
+  std::scoped_lock lock(latch_);
+  if(curr_size_==0){
+    return std::nullopt;
+  }
+  bool prefer_mru = mru_.size()>=mru_target_size_;
+  for(int round = 0; round < 2; round++){
+    bool use_mru=(round == 0)? prefer_mru: !prefer_mru;
+
+    auto &alive_list = use_mru? mru_ : mfu_;
+    auto &ghost_list = use_mru? mru_ghost_: mfu_ghost_;
+
+    for(auto it = alive_list.rbegin(); it!=alive_list.rend();++it)
+    {
+      auto alive_it=alive_map_.find(*it);
+      auto status=alive_it->second;
+      if(!status->evictable_){
+        continue;
+      }
+
+      frame_id_t victim_frame_id = status->frame_id_;
+      page_id_t victim_page_id = status->page_id_;
+      alive_list.erase(status->alive_pos_);
+      alive_map_.erase(alive_it);
+
+      ghost_list.push_front(victim_page_id);
+      status->ghost_pos_=ghost_list.begin();
+
+      status->arc_status_=use_mru? ArcStatus::MRU_GHOST : ArcStatus::MFU_GHOST;
+      status->frame_id_=-1;
+      status->evictable_=false;
+      ghost_map_.emplace(victim_page_id,status);
+
+      curr_size_--;
+      return victim_frame_id;
+    }
+  }
+  return std::nullopt; 
+}
 
 /**
  * TODO(P1): Add implementation
@@ -76,10 +115,11 @@ auto ArcReplacer::Evict() -> std::optional<frame_id_t> { return std::nullopt; }
  * leaderboard tests.
  */
 void ArcReplacer::RecordAccess(frame_id_t frame_id, page_id_t page_id, [[maybe_unused]] AccessType access_type) {
+  std::scoped_lock lock(latch_);
   BUSTUB_ENSURE(
-    frame_id >= 0 && static_cast<size_t>(frame_id) < replacer_size_,
-    "invalid frame id");
-    auto it=alive_map_.find(frame_id);
+    frame_id >= 0 && static_cast<size_t>(frame_id) <= replacer_size_,
+    "invalid frame id");//frame号不在范围，报错
+    auto it=alive_map_.find(frame_id);//内存存在，把它扔到mfu头部
     if(it!=alive_map_.end()){
       auto &status =*it->second;
       if(status.arc_status_== ArcStatus::MRU){
@@ -88,10 +128,51 @@ void ArcReplacer::RecordAccess(frame_id_t frame_id, page_id_t page_id, [[maybe_u
         mfu_.splice(mfu_.begin(),mfu_,status.alive_pos_);
       }
 
-      status.alive_pos_ =ArcStatus::MFU;
+      status.arc_status_ =ArcStatus::MFU;
       return ;
     }
-    
+    auto ghost_it = ghost_map_.find(page_id);
+    if(ghost_it == ghost_map_.end()){
+      if(mru_.size()+mru_ghost_.size()==replacer_size_){
+        auto old_page_id = mru_ghost_.back();
+        ghost_map_.erase(old_page_id);
+        mru_ghost_.pop_back();//mru+mru_ghost==c,那么得把mru_ghost踢一个
+      }else if(mru_.size()+mfu_.size()+mru_ghost_.size()+mfu_ghost_.size()== 2*replacer_size_){
+        auto old_page_id = mfu_ghost_.back();
+        ghost_map_.erase(old_page_id);
+        mfu_ghost_.pop_back(); //走到 else if，意味着第一个条件不成立。按照算法维护的约束，所以把新页面加入 MRU，不会突破这一组的上限。但四个列表的总记录可能已经达到 2c。
+      }
+      mru_.push_front(frame_id);
+      auto status =std::make_shared<FrameStatus>(page_id,frame_id,false,ArcStatus::MRU);
+      status->alive_pos_=mru_.begin();
+      alive_map_.emplace(frame_id,status);
+      return ;
+    }
+    auto status = ghost_it->second;
+
+    if(status->arc_status_ == ArcStatus::MRU_GHOST){
+      //命中 MRU ghost：增大 MRU 的目标大小。
+      size_t delta = std::max(size_t{1},mfu_ghost_.size()/mru_ghost_.size());
+      mru_target_size_=std::min(replacer_size_,mru_target_size_+delta);
+      mru_ghost_.erase(status->ghost_pos_);
+    }else{
+      // 命中 MFU ghost：减小 MRU 的目标大小。
+      size_t delta =std::max(size_t{1},mru_ghost_.size()/mfu_ghost_.size());
+      if(delta>=mru_target_size_)
+      mru_target_size_=0;
+      else
+      mru_target_size_-=delta;
+      mfu_ghost_.erase(status->ghost_pos_);
+    }
+    ghost_map_.erase(ghost_it);
+
+    status->frame_id_=frame_id;
+    status->evictable_=false;
+    mfu_.push_front(frame_id);
+    status->arc_status_=ArcStatus::MFU;
+    status->alive_pos_= mfu_.begin();
+
+    alive_map_.emplace(frame_id,status);
 }
 
 /**
@@ -111,7 +192,26 @@ void ArcReplacer::RecordAccess(frame_id_t frame_id, page_id_t page_id, [[maybe_u
  * @param frame_id id of frame whose 'evictable' status will be modified
  * @param set_evictable whether the given frame is evictable or not
  */
-void ArcReplacer::SetEvictable(frame_id_t frame_id, bool set_evictable) {}
+void ArcReplacer::SetEvictable(frame_id_t frame_id, bool set_evictable) {
+  BUSTUB_ENSURE(
+    frame_id >= 0 && static_cast<size_t>(frame_id) <= replacer_size_,
+    "invalid frame id");//frame号不在范围，报错
+  std::scoped_lock lock(latch_);
+  auto it = alive_map_.find(frame_id);
+  if(it == alive_map_.end()){
+    return ;
+  }
+  auto status = it->second;
+  if(set_evictable != status->evictable_){
+    status->evictable_=set_evictable;
+    if(set_evictable == false){
+      curr_size_--;
+    }
+    else{
+      curr_size_++;
+    }
+  }
+}
 
 /**
  * TODO(P1): Add implementation
@@ -129,7 +229,21 @@ void ArcReplacer::SetEvictable(frame_id_t frame_id, bool set_evictable) {}
  *
  * @param frame_id id of frame to be removed
  */
-void ArcReplacer::Remove(frame_id_t frame_id) {}
+void ArcReplacer::Remove(frame_id_t frame_id) {//删除arc驻留记录
+  std::scoped_lock lock(latch_);
+  auto it = alive_map_.find(frame_id); 
+  if(it!=alive_map_.end()){
+    auto status = it->second;
+    BUSTUB_ENSURE(status->evictable_,"can't remove");
+    if(status->arc_status_==ArcStatus::MFU)
+    mfu_.erase(status->alive_pos_);
+    else
+    mru_.erase(status->alive_pos_);
+    alive_map_.erase(it);
+    curr_size_--;
+  }
+  return ;
+}
 
 auto ArcReplacer::Size() -> size_t {
   std::scoped_lock lock(latch_);
